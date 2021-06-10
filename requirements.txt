@@ -1,0 +1,9 @@
+torch
+torchvision
+pytorch_lightning
+torch_optimizer
+numpy
+cachier
+imageio
+Pillow
+matplotlib
