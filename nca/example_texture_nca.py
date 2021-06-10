@@ -1,7 +1,6 @@
 # pytorch lightning port of:
 # https://colab.research.google.com/github/google-research/self-organising-systems/blob/master/notebooks/texture_nca_pytorch.ipynb
 
-import datetime
 from typing import Iterator
 
 import imageio
@@ -22,67 +21,10 @@ from torchvision.transforms import Normalize
 
 
 # ========================================================================= #
-# Helper                                                                    #
-# ========================================================================= #
-
-
-def _imread(url):
-    img = imageio.imread(url)[:, :, :3]
-    assert img.ndim == 3 and img.shape[-1] == 3, f'invalid image shape: {img.shape}, requires RGB image from: {repr(url)}'
-    return img
-
-
-def imread(url, size: int = None, tensor=True):
-    img = _imread(url)
-    if size is not None:
-        img = PIL.Image.fromarray(img)
-        img.thumbnail((size, size), PIL.Image.ANTIALIAS)
-        img = np.array(img)
-    img = np.float32(img) / 255
-    if tensor:
-        return torch.from_numpy(img).permute(2, 0, 1)
-    return img
-
-
-class VisualiseNCA(pl.Callback):
-
-    def __init__(self, steps=(128, 256, 512, 1024, 2048), period=500, img_size=128, update_ratio=0.5, figwidth=10, figpadpx=8):
-        self._period = period
-        self._count = 0
-        self._img_size = img_size
-        self._figwidth = figwidth
-        self._figpadpx = figpadpx
-        self._update_ratio = update_ratio
-        self._steps = {steps} if isinstance(steps, int) else set(steps)
-
-    def on_batch_end(self, trainer: 'pl.Trainer', pl_module: 'pl.LightningModule') -> None:
-        self._count += 1
-        if self._count % self._period != 0:
-            return
-        # generate images
-        with torch.no_grad():
-            x = pl_module.nca.make_start_organisms(1, self._img_size, device=pl_module.device)
-            images = []
-            for i in range(max(self._steps)+1):
-                x, img = pl_module.nca.forward(x, update_ratio=self._update_ratio, return_img=True)
-                if i in self._steps:
-                    if len(images) > 0:
-                        _, C, H, _ = img.shape
-                        images.append(torch.ones(C, H, self._figpadpx, dtype=img.dtype, device=pl_module.device))
-                    images.append(img[0])
-            image = torch.clip(torch.cat(images, dim=-1), 0, 1).permute(1, 2, 0).cpu().numpy()
-        # visualise
-        H, W, C = image.shape
-        fig, ax = plt.subplots(1, 1, figsize=(self._figwidth, self._figwidth * (H / W) + 0.25))
-        ax.imshow(image)
-        ax.set_axis_off()
-        fig.tight_layout()
-        plt.show()
-
-
-# ========================================================================= #
 # Channel-Wise Filters                                                      #
 # ========================================================================= #
+from nca.common import im_read
+from nca.common import VisualiseNCA
 
 
 class ChannelConv(nn.Module):
@@ -229,7 +171,7 @@ class NcaSystem(pl.LightningModule):
         # create the model
         self.nca = NCA(channels=self.hparams.nca_channels, hidden_channels=self.hparams.nca_hidden_channels, learn_filters=self.hparams.nca_learn_filters)
         # training attributes
-        self.style_img = imread(self.hparams.style_img_url, size=self.hparams.img_size)
+        self.style_img = im_read(self.hparams.style_img_url, size=self.hparams.img_size)
         self._style_loss = None
         self._organism_pool = None
 
