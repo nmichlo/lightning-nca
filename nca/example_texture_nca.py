@@ -10,7 +10,6 @@ import numpy as np
 import PIL.Image
 import pytorch_lightning as pl
 import torch
-from cachier import cachier
 from torch import nn
 from torch.nn import functional as F
 from torch.optim import Adam
@@ -27,7 +26,6 @@ from torchvision.transforms import Normalize
 # ========================================================================= #
 
 
-@cachier(stale_after=datetime.timedelta(days=16), cache_dir='data/cache')
 def _imread(url):
     img = imageio.imread(url)[:, :, :3]
     assert img.ndim == 3 and img.shape[-1] == 3, f'invalid image shape: {img.shape}, requires RGB image from: {repr(url)}'
@@ -343,11 +341,12 @@ if __name__ == '__main__':
         gpus=1,
     )
 
+    # default settings use about 5614MiB of RAM
     system = NcaSystem(
         style_img_url='yarn_ball.png',
         # extras
-        consistency_loss=True,
-        normalize_gradient=False,
+        consistency_loss=True,    # not enabled in original version
+        normalize_gradient=False, # enabled in original version
     )
 
     trainer.fit(system)
