@@ -11,6 +11,11 @@ from matplotlib import pyplot as plt
 # Image Helper                                                              #
 # ========================================================================= #
 
+_MAX = {
+    np.dtype('float32'): 1.0,
+    np.dtype('uint8'): 255,
+}
+
 
 def im_to_numpy(img: Union[torch.Tensor, np.ndarray], dtype=np.uint8, rgb=True) -> np.ndarray:
     dtype = np.dtype(dtype)
@@ -31,7 +36,8 @@ def im_to_numpy(img: Union[torch.Tensor, np.ndarray], dtype=np.uint8, rgb=True) 
     if img.shape[-1] == 1:
         img = np.concatenate([img, img, img], axis=-1)
     elif img.shape[-1] == 4:
-        img = img[:, :, :3]
+        # alpha blending, assume background is white...
+        img = np.clip(img[:, :, :3].astype('float32') + (_MAX[img.dtype] - img[:, :, -1:]), 0, _MAX[img.dtype]).astype(img.dtype)
     # make sure we are RGB
     if img.shape[-1] != 3:
         raise ValueError(f'image has invalid number of channels, only supports 1 (grey), 3 (rgb) or 4 (rgba) channels, got shape: {img.shape}')
@@ -69,7 +75,7 @@ def im_read(path_or_url, size: int = None, tensor=True) -> Union[np.ndarray, tor
     return img
 
 
-def im_show(img: Union[torch.Tensor, np.ndarray], figwidth: float = 10, title: str = None):
+def im_show(img: Union[torch.Tensor, np.ndarray], title: str = None, figwidth: float = 10, show=True):
     # normalise image
     img = im_to_numpy(img, dtype=np.uint8)
     # plot iamge
@@ -80,7 +86,9 @@ def im_show(img: Union[torch.Tensor, np.ndarray], figwidth: float = 10, title: s
     if title is not None:
         ax.set_title(title)
     fig.tight_layout()
-    plt.show()
+    if show:
+        plt.show()
+    return fig, ax
 
 
 _FILL_VALS = {

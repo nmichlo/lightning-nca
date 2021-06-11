@@ -2,6 +2,7 @@ import os
 from typing import Optional
 
 import imageio
+import matplotlib.pyplot as plt
 import numpy as np
 import pytorch_lightning as pl
 import torch
@@ -39,8 +40,9 @@ class _PeriodCallback(pl.Callback):
 
 class CallbackImshowNCA(_PeriodCallback):
 
-    def __init__(self, steps=(128, 256, 512, 1024, 2048), period: Optional[int] = 500, figwidth: float = 10, figpadpx: int = 8, forward_kwargs: Optional[dict] = None, start_batch_kwargs: Optional[dict] = None):
+    def __init__(self, save_dir: Optional[str], steps=(128, 256, 512, 1024, 2048), period: Optional[int] = 500, figwidth: float = 15, figpadpx: int = 8, forward_kwargs: Optional[dict] = None, start_batch_kwargs: Optional[dict] = None):
         super().__init__(period=period)
+        self._save_dir = save_dir
         self._figwidth = figwidth
         self._figpadpx = figpadpx
         self._steps = {steps} if isinstance(steps, int) else set(steps)
@@ -51,7 +53,15 @@ class CallbackImshowNCA(_PeriodCallback):
     def _save(self, nca_system: BaseSystemNCA, idx: Optional[int]):
         # visualise -- TODO: add wandb support
         images = _yield_nca_frames(nca_system, frame_numbers=self._steps, start_batch_kwargs=self._start_batch_kwargs, forward_kwargs=self._forward_kwargs)
-        im_show(im_row(images, pad=self._figpadpx), figwidth=self._figwidth, title='The End' if idx is None else f'Step: {idx}')
+        fig, ax = im_show(im_row(images, pad=self._figpadpx), figwidth=self._figwidth, title='The End' if idx is None else f'Step: {idx}')
+
+        # save
+        if self._save_dir is not None:
+            # prepare the file
+            name = 'vis.png' if (idx is None) else f'vis_{idx}.png'
+            path = os.path.join(self._save_dir, name)
+            os.makedirs(self._save_dir, exist_ok=True)
+            fig.savefig(path)
 
 
 class CallbackVidsaveNCA(_PeriodCallback):

@@ -21,13 +21,14 @@ from nca.nn.loss import StyleLoss
 from nca.nn.basenca import BaseNCA
 
 from nca.util.im import im_read
+from nca.util.im import im_show
 from nca.util.pl_callbacks import CallbackImshowNCA
+from nca.util.pl_callbacks import CallbackVidsaveNCA
 
 
 # ========================================================================= #
 # Neural Cellular Automata                                                  #
 # ========================================================================= #
-from nca.util.pl_callbacks import CallbackVidsaveNCA
 
 
 class TextureNCA(BaseNCA):
@@ -197,24 +198,28 @@ class TextureNcaSystem(BaseSystemNCA):
 
 if __name__ == '__main__':
 
+    out_dir = f'out/{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}'
+
     trainer = pl.Trainer(
         max_steps=10000,
         checkpoint_callback=False,
         logger=False,
         callbacks=[
-            CallbackImshowNCA(period=500, start_batch_kwargs=dict(size=256)),
-            CallbackVidsaveNCA(period=1000, start_batch_kwargs=dict(size=256), save_dir=f'out/{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}')
+            CallbackImshowNCA(period=500, start_batch_kwargs=dict(size=256), save_dir=out_dir),
+            CallbackVidsaveNCA(period=1000, start_batch_kwargs=dict(size=256), save_dir=out_dir)
         ],
         gpus=1,
     )
 
     # default settings use about 5614MiB of RAM
     system = TextureNcaSystem(
-        style_img_url='yarn_ball.png',
+        style_img_url='microbe.png',
         # extras
         consistency_loss=True,    # not enabled in original version
         normalize_gradient=False, # enabled in original version
     )
+
+    im_show(system.style_img, title='target_img')
 
     trainer.fit(system)
 
