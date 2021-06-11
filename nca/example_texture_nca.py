@@ -4,6 +4,8 @@
 from datetime import datetime
 from functools import wraps
 from typing import Iterator
+from typing import Optional
+from typing import Tuple
 
 import numpy as np
 import pytorch_lightning as pl
@@ -72,26 +74,26 @@ class TextureNcaSystem(BaseSystemNCA):
 
     def __init__(
         self,
-        style_img_url='https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/Tempera%2C_charcoal_and_gouache_mountain_painting_by_Nicholas_Roerich.jpg/301px-Tempera%2C_charcoal_and_gouache_mountain_painting_by_Nicholas_Roerich.jpg',
-        style_img_size=128,
+        style_img_uri: str = 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/04/Tempera%2C_charcoal_and_gouache_mountain_painting_by_Nicholas_Roerich.jpg/301px-Tempera%2C_charcoal_and_gouache_mountain_painting_by_Nicholas_Roerich.jpg',
+        style_img_size: int = 128,
         # nca options
-        nca_img_size=128,
-        nca_learn_filters=False,
-        nca_channels=12,
-        nca_hidden_channels=96,
-        nca_pad_mode='circular',
-        nca_default_update_ratio=0.5,
+        nca_img_size: int = 128,
+        nca_learn_filters: bool = False,
+        nca_channels: int = 12,
+        nca_hidden_channels: int = 96,
+        nca_pad_mode: str = 'circular',
+        nca_default_update_ratio: float = 0.5,
         # training options
-        iters=(32, 64),    # original is (64, 96)
-        batch_size=4,      # original is 4
-        lr=1e-3,
-        pool_size=1024,
-        pool_reset_element_period=2,
-        pool_on_cpu=True,  # save GPU memory, especially if the pool is large
+        iters: Tuple[int, int] = (32, 64),    # original is (64, 96)
+        batch_size: int = 4,
+        lr: float = 1e-3,
+        pool_size: int = 1024,
+        pool_reset_element_period: int = 2,
+        pool_on_cpu: bool = True,                        # save GPU memory, especially if the pool is large
         # extra, not configurable in original implementation
-        normalize_gradient=True,      # try this off
-        consistency_loss_scale=None,  # try this on
-        scale_loss=None,              # max loss value if you have stability problems
+        normalize_gradient: bool = True,                 # try this off
+        consistency_loss_scale: float = None,  # try this on
+        scale_loss: float = None,              # max loss value if you have stability problems
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -100,7 +102,7 @@ class TextureNcaSystem(BaseSystemNCA):
         # create the model
         self._nca = TextureNCA(channels=self.hparams.nca_channels, hidden_channels=self.hparams.nca_hidden_channels, learn_filters=self.hparams.nca_learn_filters, pad_mode=self.hparams.nca_pad_mode, default_update_ratio=self.hparams.nca_default_update_ratio)
         # training attributes
-        self.style_img = im_read(self.hparams.style_img_url, size=self.hparams.style_img_size)
+        self.style_img = im_read(self.hparams.style_img_uri, size=self.hparams.style_img_size)
         self._style_loss = None
         self._organism_pool = None
 
@@ -218,9 +220,9 @@ if __name__ == '__main__':
             vis_period_vid: int = 2500,
             vis_im_size: int = 256,
             vis_out_dir: str = f'out/{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}',
-            show: bool = False,
+            plt_show: bool = False,
         ):
-            self._show = show
+            self._show = plt_show
             self._trainer = pl.Trainer(
                 max_steps=train_steps,
                 checkpoint_callback=False,
@@ -244,7 +246,7 @@ if __name__ == '__main__':
     # eg. $ example_texture_nca.py run --help
     # eg. $ example_texture_nca.py --train_steps=500 run --lr=0.0005
     import fire
-    fire.Fire(FireRunner, command='run', name='runner')
+    fire.Fire(FireRunner, name='runner')
 
 
 # ========================================================================= #
