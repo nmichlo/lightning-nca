@@ -17,13 +17,13 @@ _MAX = {
 }
 
 
-def im_to_numpy(img: Union[torch.Tensor, np.ndarray], dtype=np.uint8, rgb=True) -> np.ndarray:
+def im_to_numpy(img: Union[torch.Tensor, np.ndarray], dtype=np.uint8, to_rgb=True) -> np.ndarray:
     dtype = np.dtype(dtype)
     if dtype not in (np.float32, np.uint8):
         raise ValueError(f'unsupported output dtype: {dtype}, must be {np.uint8} and {np.float32}')
     # check ndims
-    if not rgb:
-        raise NotImplementedError('output will always be RGB.')
+    if img.ndim == 2:
+        img = img[None, :, :] if isinstance(img, torch.Tensor) else img[:, :, None]
     if img.ndim != 3:
         raise ValueError(f'image must have 3 dimensions, (H, W, C) if a numpy array, or (C, H, W) if a torch tensor, got shape: {img.shape}')
     # handle torch tensor
