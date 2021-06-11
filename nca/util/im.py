@@ -3,13 +3,12 @@ from typing import Union
 import imageio
 import numpy as np
 import PIL
-import pytorch_lightning as pl
 import torch
 from matplotlib import pyplot as plt
 
 
 # ========================================================================= #
-# Helper                                                                    #
+# Image Helper                                                              #
 # ========================================================================= #
 
 
@@ -70,53 +69,41 @@ def im_read(path_or_url, size: int = None, tensor=True) -> Union[np.ndarray, tor
     return img
 
 
-def im_show(img: Union[torch.Tensor, np.ndarray], figwidth=10):
+def im_show(img: Union[torch.Tensor, np.ndarray], figwidth: float = 10, title: str = None):
     # normalise image
     img = im_to_numpy(img, dtype=np.uint8)
     # plot iamge
     H, W, C = img.shape
-    fig, ax = plt.subplots(1, 1, figsize=(figwidth, figwidth * (H / W) + 0.25))
+    fig, ax = plt.subplots(1, 1, figsize=(figwidth, figwidth * (H / W) + (0.25 if title is None else 0.5)))
     ax.imshow(img)
     ax.set_axis_off()
+    if title is not None:
+        ax.set_title(title)
     fig.tight_layout()
     plt.show()
 
 
-# ========================================================================= #
-# Callbacks                                                                 #
-# ========================================================================= #
+_FILL_VALS = {
+    np.dtype('uint8'): 255,
+    np.dtype('float32'): 1.0,
+}
 
 
-class VisualiseNCA(pl.Callback):
-
-    def __init__(self, steps=(128, 256, 512, 1024, 2048), period=500, img_size=128, update_ratio=0.5, figwidth=10, figpadpx=8):
-        self._period = period
-        self._count = 0
-        self._img_size = img_size
-        self._figwidth = figwidth
-        self._figpadpx = figpadpx
-        self._update_ratio = update_ratio
-        self._steps = {steps} if isinstance(steps, int) else set(steps)
-
-    def on_batch_end(self, trainer: 'pl.Trainer', pl_module: 'pl.LightningModule') -> None:
-        self._count += 1
-        if self._count % self._period != 0:
-            return
-        # generate images
-        with torch.no_grad():
-            x = pl_module.nca.make_start_organisms(1, self._img_size, device=pl_module.device)
-            images = []
-            for i in range(max(self._steps)+1):
-                # TODO: this is not general -- make generic NCA class?
-                x, img = pl_module.nca.forward(x, update_ratio=self._update_ratio, return_img=True)
-                # feed forward!
-                if i in self._steps:
-                    if len(images) > 0:
-                        _, C, H, _ = img.shape
-                        images.append(torch.ones(C, H, self._figpadpx, dtype=img.dtype, device=pl_module.device))
-                    images.append(img[0])
-        # visualise
-        im_show(torch.cat(images, dim=-1), figwidth=self._figwidth)
+def im_row(im_list, pad=8, border=False, vert=False, dtype=np.uint8):
+    # normalise images & check
+    (image, *images) = [im_to_numpy(img, dtype=dtype) for img in im_list]
+    assert all(image.shape == img.shape for img in images), 'images do not have the same shapes'
+    assert all(image.dtype == img.dtype for img in images), 'images do not have the same dtypes'
+    # padding image
+    H, W, C = image.shape
+    pad_im = np.full([pad, W, C] if vert else [H, pad, C], dtype=image.dtype, fill_value=_FILL_VALS[image.dtype])
+    # generate row
+    row = [pad_im, image] if border else [image]
+    for i, img in enumerate(images):
+        row.extend([pad_im, img])
+    row = [*row, pad_im] if border else row
+    # concatenate
+    return np.concatenate(row, axis=0 if vert else 1)
 
 
 # ========================================================================= #

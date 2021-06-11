@@ -1,103 +1,36 @@
 # pytorch lightning port of:
 # https://colab.research.google.com/github/google-research/self-organising-systems/blob/master/notebooks/texture_nca_pytorch.ipynb
-
+from datetime import datetime
+from datetime import time
 from typing import Iterator
 
-import imageio
-import matplotlib.pyplot as plt
 import numpy as np
-import PIL.Image
 import pytorch_lightning as pl
 import torch
-from torch import nn
 from torch.nn import functional as F
 from torch.optim import Adam
 from torch.optim.lr_scheduler import MultiStepLR
 from torch.utils.data import DataLoader
 from torch.utils.data import IterableDataset
 from torch.utils.data.dataset import T_co
-from torchvision.models import vgg16
-from torchvision.transforms import Normalize
 
+from nca.nn.basenca import BaseSystemNCA
+from nca.nn.filter import ChannelConv
+from nca.nn.filter import PresetFilters
+from nca.nn.loss import StyleLoss
+from nca.nn.basenca import BaseNCA
 
-# ========================================================================= #
-# Channel-Wise Filters                                                      #
-# ========================================================================= #
-from nca.common import im_read
-from nca.common import VisualiseNCA
-
-
-class ChannelConv(nn.Module):
-    def __init__(self, filters, requires_grad=False):
-        super().__init__()
-        # not-learnable
-        self._filters = nn.Parameter(torch.stack(filters), requires_grad=requires_grad)
-        N, H, W = self._filters.shape
-        assert H == W == 3
-
-    def forward(self, x):
-        b, ch, h, w = x.shape
-        y = x.reshape(b * ch, 1, h, w)
-        y = F.pad(y, [1, 1, 1, 1], 'circular')
-        y = F.conv2d(y, self._filters[:, None])
-        return y.reshape(b, -1, h, w)  # (B, C, H, W) -> (B, C*FILTER_N, H, W)
-
-
-class DefaultFilters(ChannelConv):
-    def __init__(self, requires_grad=False):
-        identity = torch.tensor([[ 0.0, 0.0, 0.0], [ 0.0, 1.0, 0.0], [ 0.0, 0.0, 0.0]])
-        laplace  = torch.tensor([[ 1.0, 2.0, 1.0], [ 2.0, -12, 2.0], [ 1.0, 2.0, 1.0]]) / 16.0
-        sobel_x  = torch.tensor([[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]]) / 8.0
-        sobel_y  = sobel_x.T
-        super().__init__([identity, sobel_x, sobel_y, laplace], requires_grad=requires_grad)
-
-
-# ========================================================================= #
-# END                                                                       #
-# ========================================================================= #
-
-
-class StyleLoss(nn.Module):
-
-    def __init__(self, target_img, style_layers=(1, 6, 11, 18, 25)):
-        super().__init__()
-        assert target_img.ndim == 3
-        assert target_img.dtype == torch.float32
-        # layers to use for computing the style
-        self._layer_indices = style_layers
-        # not-learnable:
-        with torch.no_grad():
-            self._normalise      = Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
-            self._feature_layers = nn.ModuleList(vgg16(pretrained=True).features[:max(self._layer_indices)+1])
-            self._style_targets  = nn.ParameterList(nn.Parameter(t) for t in self._compute_styles(target_img[None]))
-
-    def forward(self, x):
-        xs = self._compute_styles(x)
-        # compute loss
-        loss = 0.0
-        for x, y in zip(xs, self._style_targets):
-            loss += (x - y).square().mean()
-        return loss
-
-    def _compute_styles(self, imgs):
-        x = self._normalise(imgs)
-        grams = []
-        for i, layer in enumerate(self._feature_layers):
-            x = layer(x)
-            if i in self._layer_indices:
-                h, w = x.shape[-2:]
-                y = x.clone()  # workaround for pytorch in-place modification bug(?)
-                gram = torch.einsum('bchw, bdhw -> bcd', y, y) / (h * w)
-                grams.append(gram)
-        return grams
+from nca.util.im import im_read
+from nca.util.pl_callbacks import CallbackImshowNCA
 
 
 # ========================================================================= #
 # Neural Cellular Automata                                                  #
 # ========================================================================= #
+from nca.util.pl_callbacks import CallbackVidsaveNCA
 
 
-class NCA(nn.Module):
+class TextureNCA(BaseNCA):
 
     def __init__(self, channels=12, hidden_channels=96, learn_filters=False):
         super().__init__()
@@ -107,20 +40,13 @@ class NCA(nn.Module):
         if learn_filters:
             self.filter = ChannelConv(list(torch.randn(4, 3, 3)), requires_grad=True)  # not in original
         else:
-            self.filter = DefaultFilters(requires_grad=False)
+            self.filter = PresetFilters(requires_grad=False)
         # learnable secondary layers
         self.w1 = torch.nn.Conv2d(in_channels=channels * 4, out_channels=hidden_channels, kernel_size=1)
         self.w2 = torch.nn.Conv2d(in_channels=hidden_channels, out_channels=channels, kernel_size=1, bias=False)
         self.w2.weight.data.zero_()
 
-    def forward(self, x, iterations=1, update_ratio=0.5, return_img=False):
-        for _ in range(iterations):
-            x = self._forward_single(x, update_ratio=update_ratio)
-        if return_img:
-            return x, self.extract_rgb(x)
-        return x
-
-    def _forward_single(self, x, update_ratio=0.5):
+    def _forward_single_iter(self, x, update_ratio=0.5):
         # generate random update mask
         B, C, H, W = x.shape
         update_mask = torch.rand(B, 1, H, W, device=x.device) < update_ratio
@@ -128,21 +54,16 @@ class NCA(nn.Module):
         y = self.w2(torch.relu(self.w1(self.filter(x))))
         return x + y * update_mask
 
-    def make_start_organisms(self, batch_size, size=128, device=None):
+    def make_start_batch(self, batch_size, device=None, size=128):
         return torch.zeros(batch_size, self.chn, size, size, device=device, requires_grad=False)
 
-    @staticmethod
-    def extract_rgb(x):
-        # why + 0.5?
-        return x[..., :3, :, :] + 0.5
-
 
 # ========================================================================= #
-# NCA System                                                                #
+# Neural Cellular Automata - Pytorch Lightning System                       #
 # ========================================================================= #
 
 
-class NcaSystem(pl.LightningModule):
+class TextureNcaSystem(BaseSystemNCA):
 
     def __init__(
         self,
@@ -169,14 +90,15 @@ class NcaSystem(pl.LightningModule):
         # check hparams
         self.hparams.iters_min, self.hparams.iters_max = (self.hparams.iters, self.hparams.iters) if isinstance(self.hparams.iters, int) else self.hparams.iters
         # create the model
-        self.nca = NCA(channels=self.hparams.nca_channels, hidden_channels=self.hparams.nca_hidden_channels, learn_filters=self.hparams.nca_learn_filters)
+        self._nca = TextureNCA(channels=self.hparams.nca_channels, hidden_channels=self.hparams.nca_hidden_channels, learn_filters=self.hparams.nca_learn_filters)
         # training attributes
         self.style_img = im_read(self.hparams.style_img_url, size=self.hparams.img_size)
         self._style_loss = None
         self._organism_pool = None
 
-    def forward(self, *args, **kwargs):
-        return self.nca(*args, **kwargs)
+    @property
+    def nca(self) -> BaseNCA:
+        return self._nca
 
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - #
     # Training Setup                                                        #
@@ -185,7 +107,7 @@ class NcaSystem(pl.LightningModule):
     def on_train_start(self):
         # make loss & organism pool
         loss = StyleLoss(target_img=self.style_img)
-        pool = self.nca.make_start_organisms(batch_size=self.hparams.pool_size, size=self.hparams.img_size)
+        pool = self.nca.make_start_batch(batch_size=self.hparams.pool_size, size=self.hparams.img_size)
         # load to correct device, store pool on CPU to save some memory
         # style loss is too slow on CPU, but uses a fair bit of RAM
         self._style_loss = loss.to(self.device)
@@ -205,7 +127,7 @@ class NcaSystem(pl.LightningModule):
         with torch.no_grad():
             # reset runs in the pool
             if i % self.hparams.pool_reset_element_period == 0:
-                self._organism_pool[idxs[0]] = self.nca.make_start_organisms(batch_size=1, size=self.hparams.img_size, device=self._organism_pool.device)[0]
+                self._organism_pool[idxs[0]] = self.nca.make_start_batch(batch_size=1, size=self.hparams.img_size, device=self._organism_pool.device)[0]
             # load incomplete runs from the pool
             x = self._organism_pool[idxs].to(self.device)
             x_img = self.nca.extract_rgb(x)
@@ -279,12 +201,15 @@ if __name__ == '__main__':
         max_steps=10000,
         checkpoint_callback=False,
         logger=False,
-        callbacks=[VisualiseNCA(period=250, img_size=256)],
+        callbacks=[
+            CallbackImshowNCA(period=500, start_batch_kwargs=dict(size=256)),
+            CallbackVidsaveNCA(period=1000, start_batch_kwargs=dict(size=256), save_dir=f'out/{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}')
+        ],
         gpus=1,
     )
 
     # default settings use about 5614MiB of RAM
-    system = NcaSystem(
+    system = TextureNcaSystem(
         style_img_url='yarn_ball.png',
         # extras
         consistency_loss=True,    # not enabled in original version
