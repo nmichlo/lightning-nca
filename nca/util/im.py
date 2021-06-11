@@ -2,7 +2,7 @@ from typing import Union
 
 import imageio
 import numpy as np
-import PIL
+from PIL import Image, ImageOps
 import torch
 from matplotlib import pyplot as plt
 
@@ -17,7 +17,7 @@ _MAX = {
 }
 
 
-def im_to_numpy(img: Union[torch.Tensor, np.ndarray], dtype=np.uint8, to_rgb=True) -> np.ndarray:
+def im_to_numpy(img: Union[torch.Tensor, np.ndarray], dtype=np.uint8) -> np.ndarray:
     dtype = np.dtype(dtype)
     if dtype not in (np.float32, np.uint8):
         raise ValueError(f'unsupported output dtype: {dtype}, must be {np.uint8} and {np.float32}')
@@ -53,7 +53,7 @@ def im_to_numpy(img: Union[torch.Tensor, np.ndarray], dtype=np.uint8, to_rgb=Tru
     return img
 
 
-def im_read(path_or_url, size: int = None, tensor=True) -> Union[np.ndarray, torch.Tensor]:
+def im_read(path_or_url, size: int = None, crop_square=False, tensor=True) -> Union[np.ndarray, torch.Tensor]:
     """
     In general across this library we consider:
     - numpy images as having the shape (H, W, C).
@@ -64,15 +64,28 @@ def im_read(path_or_url, size: int = None, tensor=True) -> Union[np.ndarray, tor
     img = imageio.imread(path_or_url)
     img = im_to_numpy(img, dtype=np.uint8)
     # resize image
-    if size is not None:
-        img = PIL.Image.fromarray(img)
-        img.thumbnail((size, size), PIL.Image.ANTIALIAS)
+    if (size is not None) or crop_square:
+        img = Image.fromarray(img)
+        # crop or resize
+        if crop_square:
+            if size is None:
+                size = min(img.width, img.height)
+            img = ImageOps.fit(img, (size, size), Image.ANTIALIAS)
+        else:
+            img.thumbnail((size, size), Image.ANTIALIAS)
+            img.thumbnail()
+        # convert back to numpy
         img = np.array(img)
     # convert to float32
     img = np.float32(img) / 255
     if tensor:
         return torch.from_numpy(img).permute(2, 0, 1)
     return img
+
+
+def im_save(img: Union[torch.Tensor, np.ndarray], path: str, imsave_kwargs=None):
+    img = im_to_numpy(img, dtype=np.uint8)
+    imageio.imsave(path, img, **({} if (imsave_kwargs is None) else imsave_kwargs))
 
 
 def im_show(img: Union[torch.Tensor, np.ndarray], title: str = None, figwidth: float = 10, show=True):
@@ -99,9 +112,11 @@ _FILL_VALS = {
 
 def im_row(im_list, pad=8, border=False, vert=False, dtype=np.uint8):
     # normalise images & check
-    (image, *images) = [im_to_numpy(img, dtype=dtype) for img in im_list]
-    assert all(image.shape == img.shape for img in images), 'images do not have the same shapes'
-    assert all(image.dtype == img.dtype for img in images), 'images do not have the same dtypes'
+    (image, *images) = (im_to_numpy(img, dtype=dtype) for img in im_list)
+    # check images
+    shape, *shapes = (tuple(np.delete(img.shape, 0 if vert else 1)) for img in [image, *images])
+    assert all(shape == shp for shp in shapes), f'images do not have the same required concat dimension sizes: {[shape, *shapes]} for {[img.shape for img in [image, *images]]}'
+    assert all(image.dtype == img.dtype for img in images), f'images do not have the same dtypes: {[img.dtype for img in [image, *images]]}'
     # padding image
     H, W, C = image.shape
     pad_im = np.full([pad, W, C] if vert else [H, pad, C], dtype=image.dtype, fill_value=_FILL_VALS[image.dtype])
