@@ -16,7 +16,6 @@
 
 - PyTorch Lightning implementations are clean
 - I wanted to learn about these for fun
-- I have some ideas I want to try!
 
 ## 🧪 &nbsp;Get Started
 
