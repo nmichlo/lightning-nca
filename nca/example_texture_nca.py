@@ -1,7 +1,7 @@
 # pytorch lightning port of:
 # https://colab.research.google.com/github/google-research/self-organising-systems/blob/master/notebooks/texture_nca_pytorch.ipynb
+
 from datetime import datetime
-from datetime import time
 from typing import Iterator
 
 import numpy as np
