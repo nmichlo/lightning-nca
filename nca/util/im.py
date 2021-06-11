@@ -73,7 +73,6 @@ def im_read(path_or_url, size: int = None, crop_square=False, tensor=True) -> Un
             img = ImageOps.fit(img, (size, size), Image.ANTIALIAS)
         else:
             img.thumbnail((size, size), Image.ANTIALIAS)
-            img.thumbnail()
         # convert back to numpy
         img = np.array(img)
     # convert to float32
