@@ -2,9 +2,7 @@
 # https://colab.research.google.com/github/google-research/self-organising-systems/blob/master/notebooks/texture_nca_pytorch.ipynb
 
 from datetime import datetime
-from functools import wraps
 from typing import Iterator
-from typing import Optional
 from typing import Tuple
 
 import numpy as np
@@ -17,12 +15,11 @@ from torch.utils.data import DataLoader
 from torch.utils.data import IterableDataset
 from torch.utils.data.dataset import T_co
 
+from nca.nn.basenca import BaseNCA
 from nca.nn.basenca import BaseSystemNCA
 from nca.nn.filter import ChannelConv
 from nca.nn.filter import PresetFilters
 from nca.nn.loss import StyleLoss
-from nca.nn.basenca import BaseNCA
-
 from nca.util.im import im_read
 from nca.util.im import im_show
 from nca.util.pl_callbacks import CallbackImshowNCA
@@ -210,43 +207,43 @@ class TextureNcaSystem(BaseSystemNCA):
 
 if __name__ == '__main__':
 
-    class FireRunner(object):
-        def __init__(
-            self,
-            train_steps: int = 5000,
-            train_cuda: bool = torch.cuda.is_available(),
-            # visualise
-            vis_period_plt: int = 500,
-            vis_period_vid: int = 2500,
-            vis_im_size: int = 256,
-            vis_out_dir: str = f'out/{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}',
-            plt_show: bool = False,
-        ):
-            self._show = plt_show
-            self._trainer = pl.Trainer(
-                max_steps=train_steps,
-                checkpoint_callback=False,
-                logger=False,
-                callbacks=[
-                    CallbackImshowNCA(period=vis_period_plt, start_batch_kwargs=dict(size=vis_im_size), save_dir=vis_out_dir, show=self._show),
-                    CallbackVidsaveNCA(period=vis_period_vid, start_batch_kwargs=dict(size=vis_im_size), save_dir=vis_out_dir)
-                ],
-                gpus=1 if train_cuda else 0,
-            )
+    from nca.util.decorator import merge_kwargs
 
-        @wraps(TextureNcaSystem.__init__)
-        def run(self, **kwargs):
-            # initialise system & train
-            system = TextureNcaSystem(**kwargs)
-            im_show(system.style_img, title='target_img', show=self._show)
-            self._trainer.fit(system)
+    def make_nca_trainer(
+        train_steps: int = 5000,
+        train_cuda: bool = torch.cuda.is_available(),
+        # visualise
+        vis_period_plt: int = 500,
+        vis_period_vid: int = 2500,
+        vis_im_size: int = 256,
+        vis_out_dir: str = f'out/{datetime.now().strftime("%Y-%m-%d_%H-%M-%S")}',
+        plt_show: bool = True,
+    ):
+        return pl.Trainer(
+            max_steps=train_steps,
+            checkpoint_callback=False,
+            logger=False,
+            callbacks=[
+                CallbackImshowNCA(period=vis_period_plt, start_batch_kwargs=dict(size=vis_im_size), save_dir=vis_out_dir, show=plt_show),
+                CallbackVidsaveNCA(period=vis_period_vid, start_batch_kwargs=dict(size=vis_im_size), save_dir=vis_out_dir)
+            ],
+            gpus=1 if train_cuda else 0,
+        )
+
+    @merge_kwargs(make_nca_trainer, TextureNcaSystem)
+    def run(trainer_kwargs: dict, nca_kwargs: dict):
+        # initialise system
+        system = TextureNcaSystem(**nca_kwargs)
+        # initialise the trainer
+        trainer = make_nca_trainer(**trainer_kwargs)
+        # fit the model
+        trainer.fit(system)
 
     # entry point
     # eg. $ example_texture_nca.py --help
-    # eg. $ example_texture_nca.py run --help
-    # eg. $ example_texture_nca.py --train_steps=500 run --lr=0.0005
+    # eg. $ example_texture_nca.py --train_steps=500 --lr=0.0005
     import fire
-    fire.Fire(FireRunner, name='runner')
+    fire.Fire(run)
 
 
 # ========================================================================= #
